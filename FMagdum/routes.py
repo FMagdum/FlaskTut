@@ -3,15 +3,17 @@ import secrets
 from PIL import Image
 from flask import render_template,url_for, flash, redirect, request, abort
 from FMagdum import app, db, bcrypt
-from FMagdum.forms import RegistrationForm, LoginForm, UpdateAccountForm, PostForm
+from FMagdum.forms import (RegistrationForm, LoginForm, UpdateAccountForm, 
+                            PostForm, RequestResetForm, ResetPasswordForm)
 from FMagdum.models import User, Post
 from flask_login import login_user, current_user, logout_user, login_required
 
 @app.route("/")
 @app.route("/home")
 def home():
-    posts = Post.query.all()
-    return render_template('home.html', posts=posts)
+    page = request.args.get('page', 1, type=int)
+    posts = Post.query.order_by(Post.date_posted.desc()).paginate(page=page,per_page=3)
+    return render_template('home.html', posts=posts, legend="Create New Post")
 
 @app.route("/about")
 def about():
@@ -96,7 +98,7 @@ def new_post():
         db.session.commit()
         flash('Your post has been created', 'success')
         return redirect(url_for('home'))
-    return render_template('create_post.html', title='New Post', form=form, legend='Create Post')
+    return render_template('create_post.html', title='New Post', form=form, legend='')
 
 @app.route("/post/<int:post_id>")
 def post(post_id):
@@ -119,7 +121,7 @@ def update_post(post_id):
     elif request.method == 'GET':
         form.title.data = post.title
         form.content.data = post.content
-    return render_template('create_post.html', title='Update Post', form=form, legend = 'Update Post')
+    return render_template('create_post.html', title='Update Post', form=form, legend = 'Create New Post')
 
 @app.route("/post/<int:post_id>/delete", methods=['POST'])
 @login_required
@@ -131,3 +133,33 @@ def delete_post(post_id):
     db.session.commit()
     flash('Your post has been deleted!', 'success')
     return redirect(url_for('home'))
+
+
+@app.route("/user/<string:username>")
+def user_posts(username):
+    page = request.args.get('page', 1, type=int)
+    user = User.query.filter_by(username=username).first_or_404()
+    posts = Post.query.filter_by(author=user)\
+        .order_by(Post.date_posted.desc())\
+        .paginate(page=page,per_page=3)
+    return render_template('user_posts.html', posts=posts, user=user, legend='Create New Post')
+
+@app.route("/reset_password", methods=['GET', 'POST'])
+def reset_request():
+    if current_user.is_authenticated:
+        return redirect(url_for('home')) 
+    form = RequestResetForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(email=form.email.data).first()
+    return render_template('reset_request.html', title='Reset Password', form=form)
+
+@app.route("/reset_password/<token>", methods=['GET', 'POST'])
+def reset_token(token):
+    if current_user.is_authenticated:
+        return redirect(url_for('home')) 
+    user = User.verify_reset_token(token)
+    if user is None:
+        flash('That is an invalid or expired token', 'warning')
+        return redirect(url_for('reset_request'))
+    form = ResetPasswordForm()
+    return render_template('reset_token.html', title='Reset Password', form=form)
